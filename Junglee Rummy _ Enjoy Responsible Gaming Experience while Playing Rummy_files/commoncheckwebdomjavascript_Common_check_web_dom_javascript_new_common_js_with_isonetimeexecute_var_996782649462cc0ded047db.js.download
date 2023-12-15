@@ -1,0 +1,42 @@
+ function domState() {
+     if (document.readyState === "complete") {
+         let x = document.querySelector(".static-page-content");
+
+         let txt = x.innerText ?? "";
+         if (txt != "") {
+             return true;
+         }
+      
+         return false;
+         
+     }
+     else {
+         return false;
+     }
+
+ }
+
+
+ var isOneTimeExecute = false;
+ let intrvl = setInterval(() => {
+     let check = domState();
+     if (check) {
+         let userid = localStorage.getItem('userId') ?? ""
+         if (userid != "") {
+             clearInterval(intrvl)
+             setTimeout(() => {
+                 domJavascript()
+             }, 1500);
+         }
+         else if (!isOneTimeExecute) {
+             isOneTimeExecute = true
+             setTimeout(() => {
+
+                 domJavascript()
+                 
+             }, 1500);
+         }
+
+     }
+
+ }, 500);

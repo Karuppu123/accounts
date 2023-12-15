@@ -1,0 +1,236 @@
+function Visit(appVersion, channelId, clientTimestamp,
+               domain, productId) {
+
+    this.appVersion = appVersion;
+    this.channelId = channelId;
+    this.clientTimestamp = clientTimestamp;
+    this.domain = domain;
+    this.productId = productId;
+    this.userId = null;
+}
+
+Visit.prototype.getData = function () {
+    var data = {};
+    data["appVersion"] = this.appVersion;
+    data["channelId"] = this.channelId;
+    data["clientTimestamp"] = this.clientTimestamp;
+    data["domain"] = this.domain.substr(this.domain.substr(0, this.domain.lastIndexOf(".")).lastIndexOf(".") + 1);
+    data["productId"] = this.productId;
+    data["userId"] = this.userId;
+
+    var nAgt = navigator.userAgent;
+    var browserName = navigator.appName;
+    var nameOffset, verOffset;
+
+    if ((verOffset = nAgt.indexOf("Opera")) != -1) {
+        browserName = "Opera";
+        fullVersion = nAgt.substring(verOffset + 6);
+        if ((verOffset = nAgt.indexOf("Version")) != -1)
+            fullVersion = nAgt.substring(verOffset + 8);
+    }
+    else if ((verOffset = nAgt.indexOf("MSIE")) != -1) {
+        browserName = "Microsoft Internet Explorer";
+        fullVersion = nAgt.substring(verOffset + 5);
+    }
+    else if ((verOffset = nAgt.indexOf("Chrome")) != -1) {
+        browserName = "Chrome";
+        fullVersion = nAgt.substring(verOffset + 7);
+    }
+    else if ((verOffset = nAgt.indexOf("Safari")) != -1) {
+        browserName = "Safari";
+        fullVersion = nAgt.substring(verOffset + 7);
+        if ((verOffset = nAgt.indexOf("Version")) != -1)
+            fullVersion = nAgt.substring(verOffset + 8);
+    }
+    else if ((verOffset = nAgt.indexOf("Firefox")) != -1) {
+        browserName = "Firefox";
+        fullVersion = nAgt.substring(verOffset + 8);
+    }
+    else if ((nameOffset = nAgt.lastIndexOf(' ') + 1) <
+        (verOffset = nAgt.lastIndexOf('/'))) {
+        browserName = nAgt.substring(nameOffset, verOffset);
+        fullVersion = nAgt.substring(verOffset + 1);
+        if (browserName.toLowerCase() == browserName.toUpperCase()) {
+            browserName = navigator.appName;
+        }
+    }
+
+    data["browserName"] = browserName;
+    data["userAgent"] = navigator.userAgent;
+
+    window.location.search
+        .substr(1)
+        .split("&")
+        .forEach(function (item) {
+            if (item.indexOf("=") == -1) return;
+            tmp = item.split("=");
+            data[tmp[0]] = decodeURIComponent(tmp[1]);
+        });
+
+    return data;
+
+}
+
+function AnalyticsManager(timeout, duration,
+                          appVersion, channelId, productId, events) {
+
+    this.events = [];
+    this.sentEvents = [];
+    this.timeStamp;
+    this.timer;
+    this.duration = duration;
+    this.url = this.GetUrl();
+    this.timeout = timeout;
+    this.userId;
+    this.analyticsCookie;
+    this.lastBatchUploadTime;
+
+    this.visit = new Visit(
+        appVersion, channelId, Date.now(),
+        window.location.host, productId
+    );
+
+    var me = this;
+    events.forEach(function onItem(event) {
+        me.push(event);
+    });
+}
+
+AnalyticsManager.prototype.GetUrl = function () {
+    var host = location.host;
+    if(host.indexOf("stage.howzat.com") > -1)
+        return "https://stage-click.howzat.com/click/track";
+    else if(host.indexOf("howzat.com") > -1)
+        return "https://click.howzat.com/click/track";
+    else if(host.indexOf("jungleerummy.com") > -1)
+        return "https://click.jungleerummy.com/click/track";
+
+    var mainDomain = host.substr(host.indexOf(".") + 1)
+    return "https://click." + mainDomain + "/click/track";
+}
+
+AnalyticsManager.prototype.SendEvent = function (e) {
+    if (this.lastBatchUploadTime == null ||
+        Date.now() - this.lastBatchUploadTime >
+        this.timeout) {
+        this._sendEvent([e], true);
+    } else {
+        this._sendEvent([e], false);
+    }
+};
+
+AnalyticsManager.prototype._stopTimer = function () {
+    if (this.timer)
+        clearTimeout(this.timer);
+
+    this.timer = null;
+}
+
+AnalyticsManager.prototype._sendEvent = function (events, bSync) {
+    var me = this;
+    if (bSync) {
+        me.bSyncEventInProgress = true;
+        me._stopTimer();
+    }
+    var payload = {
+        "events": events,
+        "visit": me.visit.getData()
+    };
+
+    var xhttp;
+    if (window.XMLHttpRequest) {
+        xhttp = new XMLHttpRequest();
+    } else {
+        // code for old IE browser
+        xhttp = new ActiveXObject("Microsoft.XMLHTTP");
+    }
+
+    xhttp.onreadystatechange = function responseHandler() {
+        if (this.readyState == 4) {
+            if (this.status >= 200 && this.status <= 299) {
+                me.lastBatchUploadTime = Date.now();
+            }
+            else {
+                me.events = events.concat(me.events);
+            }
+            if (bSync) {
+                me.bSyncEventInProgress = false;
+                me._startTimer();
+            }
+        }
+    }
+
+    xhttp.open("POST", me.url, true);
+    xhttp.setRequestHeader("Content-Type", "application/json");
+    xhttp.withCredentials = true;
+    xhttp.send(JSON.stringify(payload));
+}
+
+AnalyticsManager.prototype.SetUser = function (userId) {
+    if (this.visit == null) {
+        return;
+    }
+    this.visit.userId = userId;
+}
+
+AnalyticsManager.prototype.SetJourney = function (journey) {
+    this.journey = journey;
+}
+
+AnalyticsManager.prototype.SetSource = function (source) {
+    this.source = source;
+}
+
+AnalyticsManager.prototype.SetContext = function (context) {
+    if (this.visit == null) {
+        return;
+    }
+    this.visit.utmTerm = context["utm_term"];
+    this.visit.utmMedium = context["utm_medium"];
+    this.visit.utmSource = context["utm_source"];
+    this.visit.utmContent = context["utm_content"];
+    this.visit.utmCampaign = context["utm_campaign"];
+}
+
+AnalyticsManager.prototype.push = function (obj) {
+    if (!obj)
+        return;
+    if (obj["userId"])
+        this.SetUser(obj["userId"]);
+    else
+        this.SetUser(null);
+
+    e = obj["event"];
+    if (e) {
+        e["clientTimestamp"] = Date.now();
+        this.events.push(e);
+        this._startTimer();
+    }
+}
+
+AnalyticsManager.prototype._sendStoredEvents = function (e) {
+    var events = this.events.splice(0, this.events.length);
+    this.sentEvents = this.sentEvents.concat(events);
+    if (this.lastBatchUploadTime == null ||
+        Date.now() - this.lastBatchUploadTime >
+        this.timeout) {
+        this._sendEvent(events, true);
+    } else {
+        this._sendEvent(events, false);
+    }
+}
+
+AnalyticsManager.prototype._startTimer = function (e) {
+    var me = this;
+    if (me.bSyncEventInProgress)
+        return;
+
+    if (me.timer == null) {
+        me.timer = setTimeout(function onTimeout() {
+            if(me.events.length > 0) {
+                me._sendStoredEvents();
+            }
+            me.timer = null;
+        }, me.duration);
+    }
+}
